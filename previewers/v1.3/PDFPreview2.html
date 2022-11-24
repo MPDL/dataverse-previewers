@@ -2,7 +2,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title class="videoPreviewText">Video Preview</title>
+    <title class="pdfPreviewText">PDF Preview</title>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js"></script>
     <script type="text/javascript" src="js/xss.js"></script>
     <script type="text/javascript" src="js/pdf2.js"></script>
@@ -22,10 +22,10 @@
 <body class="container">
     <main>
         <img id='logo' alt='Site Logo'>
-        <h1 class="page-title videoPreviewText">PDF Preview</h1>
+        <h1 class="page-title pdfPreviewText">PDF Preview</h1>
         <div class='preview-container'>
-            <div class='preview-header'></div>
-            <div class='preview'></div>
+            <iframe id="if" src="" style="border: none;width:100%;height:100vh;">
+            </iframe>
         </div>
     </main>
 </body>

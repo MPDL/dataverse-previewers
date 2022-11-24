@@ -12,5 +12,14 @@ function writeContent(fileUrl, file, title, authors) {
         fileUrl = fileUrl.replace('https://localhost', 'http://localhost');
     }
     addStandardPreviewHeader(file, title, authors);
-    $(".preview").append($("<iframe/>").attr("src","fileUrl").attr("width","100%").attr("height", "100%"));
+    get_pdf(fileUrl);
+}
+
+async function get_pdf(fileUrl) {
+
+    const response = await fetch(fileUrl);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const frame = document.getElementById('if');
+    frame.setAttribute('src', url);
 }

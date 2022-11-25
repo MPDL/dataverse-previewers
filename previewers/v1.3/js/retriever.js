@@ -188,8 +188,8 @@ function startPreview(retrieveFile) {
                     'this.onerror=null;this.src="images/logo_placeholder.png";');
         }
         //Footer
-    var footer = $.i18n("footer");
-    $('body').append($('<footer/>').html(footer).attr('id', 'footer'));
+    //var footer = $.i18n("footer");
+    //$('body').append($('<footer/>').html(footer).attr('id', 'footer'));
 
         if (previewMode !== 'true') {
             options = {

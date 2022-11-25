@@ -17,9 +17,17 @@ function writeContent(fileUrl, file, title, authors) {
 
 async function get_pdf(fileUrl) {
 
-    const response = await fetch(fileUrl);
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const frame = document.getElementById('if');
-    frame.setAttribute('src', url);
+    try {
+        const response = await fetch(fileUrl);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const frame = document.getElementById('if');
+        frame.setAttribute('src', url);
+    }
+    finally {
+
+        const throbber = document.getElementById("throbber");
+        if (throbber)
+            throbber.parentNode.removeChild(throbber);
+    }
 }

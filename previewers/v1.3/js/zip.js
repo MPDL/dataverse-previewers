@@ -195,64 +195,6 @@ async function lazyLoad(event, data) {
 
 }
 
-async function testFunction() {
-
-    //
-
-    let testArray = [];
-    //give me first entry of testArray and print on co
-    console.log(testArray[0]);
-
-    //iterate through testarray and check if entry is a email address by regex. use arrow functions
-    testArray.forEach(entry => {
-        if (entry.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-            console.log(entry);
-        }
-    }
-
-    //select all entries from testarray which are valid URLs and add to new array
-
-    let urlArray = testArray.filter(entry => entry.match(/^(http|https):\/\/[^ "]+$/));
-    //sort urlArray by length of URL
-    urlArray.sort((a, b) => a.length - b.length);
-
-    //Create a Excel file containing the values from 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([testArray]);
-    XLSX.utils.book_append_sheet(wb, ws, "Test");
-    XLSX.writeFile(wb, "test.xlsx");
-    
-    //Get data from https://pure.mpg.de/rest/items/ and create a table with titles asnychro
-    const response = await fetch('https://pure.mpg.de/rest/items/');
-    const data = await response.json();
-    const titles = data._embedded.items.map(item => item.title);
-    const table = $('<table>');
-    titles.forEach(title => {
-        table.append('<tr><td>' + title + '</td></tr>');
-    }  );
-
-
-    //Connect to elasticsearch instance and search for Hans Meier
-    const response = await fetch('http://localhost:9200/_search', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            query: { match: { name: 'Hans Meier' } }
-        })
-    });
-    const data = await response.json();
-    const hits = data.hits.hits;
-    hits.forEach(hit => {
-        console.log(hit._source.name);
-    }
-    );
-    
-    
- 
-}
-
 //Create Tree
 async function createTree(dataStructure) {
     $("#treegrid").fancytree({

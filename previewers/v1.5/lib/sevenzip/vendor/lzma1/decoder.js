@@ -1,5 +1,6 @@
 import { LzOutWindow } from "./lz-window.js";
 import { RangeDecoder } from "./range-decoder.js";
+import { InputBuffer, OutputBuffer } from "./streams.js";
 import { _MAX_UINT32, CHOICE_ARRAY_SIZE, createBitTree, DEFAULT_WINDOW_SIZE, getLenToPosState, initArray, initBitModels, LITERAL_DECODER_SIZE, MATCH_DECODERS_SIZE, POS_DECODERS_SIZE, REP_DECODERS_SIZE, stateUpdateChar, } from "./utils.js";
 
 export class Decoder {
@@ -87,19 +88,12 @@ export class Decoder {
         outSize = value;
       }
     }
+    this.initProbabilities();
+    this.resetChunkState(false);
     this.rangeDecoder.setStream(input);
-    this.flush();
-    this.outWindow.stream = null;
+    this.rangeDecoder.init();
     this.outWindow.stream = output;
-    this.init();
-    this.state = 0;
-    this.rep0 = 0;
-    this.rep1 = 0;
-    this.rep2 = 0;
-    this.rep3 = 0;
     this.outSize = outSize;
-    this.nowPos64 = 0n;
-    this.prevByte = 0;
   }
 
   decompress(input, output) {
@@ -116,6 +110,132 @@ export class Decoder {
         return;
       }
     }
+  }
+
+  setDictionarySize(dictionarySize) {
+    if (dictionarySize < 0) {
+      return false;
+    }
+    if (this.dictSizeCheck !== dictionarySize) {
+      this.dictSizeCheck = Math.max(dictionarySize, 1);
+      this.outWindow.windowSize = Math.max(this.dictSizeCheck, DEFAULT_WINDOW_SIZE);
+      this.outWindow.buffer = new Uint8Array(this.outWindow.windowSize);
+    }
+    return true;
+  }
+
+  setLcLpPb(lc, lp, pb) {
+    if (lc > 8 || lp > 4 || pb > 4) {
+      return false;
+    }
+    this.literalDecoder.numPrevBits = lc;
+    this.literalDecoder.numPosBits = lp;
+    this.literalDecoder.posMask = (1 << lp) - 1;
+    this.posStateMask = (1 << pb) - 1;
+    const numStates = 1 << (lc + lp);
+    this.literalDecoder.coders = [];
+    for (let i = 0; i < numStates; i += 1) {
+      this.literalDecoder.coders[i] = {
+        decoders: initArray(LITERAL_DECODER_SIZE),
+      };
+    }
+    this.lenDecoder.numPosStates = 1 << pb;
+    this.repLenDecoder.numPosStates = 1 << pb;
+    this.lenDecoder.lowCoder = [];
+    this.lenDecoder.midCoder = [];
+    this.repLenDecoder.lowCoder = [];
+    this.repLenDecoder.midCoder = [];
+    for (let posState = 0; posState < (1 << pb); posState += 1) {
+      this.lenDecoder.lowCoder[posState] = createBitTree(3);
+      this.lenDecoder.midCoder[posState] = createBitTree(3);
+      this.repLenDecoder.lowCoder[posState] = createBitTree(3);
+      this.repLenDecoder.midCoder[posState] = createBitTree(3);
+    }
+    return true;
+  }
+
+  initProbabilities() {
+    initBitModels(this.matchDecoders);
+    initBitModels(this.rep0LongDecoders);
+    initBitModels(this.repDecoders);
+    initBitModels(this.repG0Decoders);
+    initBitModels(this.repG1Decoders);
+    initBitModels(this.repG2Decoders);
+    initBitModels(this.posDecoders);
+    this.initLiteralDecoder();
+    for (let i = 0; i < 4; ++i) {
+      initBitModels(this.posSlotDecoders[i].models);
+    }
+    this.initLenDecoder(this.lenDecoder);
+    this.initLenDecoder(this.repLenDecoder);
+    initBitModels(this.posAlignDecoder.models);
+  }
+
+  resetProbabilities() {
+    this.initProbabilities();
+    this.state = 0;
+    this.rep0 = 0;
+    this.rep1 = 0;
+    this.rep2 = 0;
+    this.rep3 = 0;
+    this.prevByte = 0;
+  }
+
+  resetDictionary() {
+    this.outWindow.init(false);
+    this.nowPos64 = 0n;
+  }
+
+  resetChunkState(solid) {
+    this.outWindow.init(solid);
+    if (!solid) {
+      this.state = 0;
+      this.rep0 = 0;
+      this.rep1 = 0;
+      this.rep2 = 0;
+      this.rep3 = 0;
+      this.prevByte = 0;
+      this.nowPos64 = 0n;
+    }
+  }
+
+  feedUncompressed(data) {
+    for (let i = 0; i < data.length; i += 1) {
+      this.outWindow.putByte(data[i]);
+    }
+    this.nowPos64 += BigInt(data.length);
+    if (data.length > 0) {
+      this.prevByte = data[data.length - 1];
+    }
+  }
+
+  flushOutWindow() {
+    this.flush();
+  }
+
+  decodeChunk(input, outSize, solid = false) {
+    const inputBuffer = input instanceof InputBuffer ? input : new InputBuffer(input);
+    const output = new OutputBuffer(Math.max(32, outSize * 2));
+    this.rangeDecoder.setStream(inputBuffer);
+    this.rangeDecoder.init();
+    this.outWindow.init(solid);
+    this.outWindow.stream = output;
+    this.outSize = BigInt(outSize);
+    const startPos = this.nowPos64;
+
+    while (this.nowPos64 - startPos < this.outSize) {
+      const result = this.codeOneChunk();
+      if (result === -1) {
+        throw new Error("corrupted input");
+      }
+      if (result) {
+        break;
+      }
+    }
+
+    this.flush();
+    this.outWindow.stream = null;
+    return output.toArray();
   }
 
   createLenDecoder() {

@@ -15,7 +15,7 @@ export function toSafeNumber(value) {
 export function readBitset(bytes, count) {
   const flags = new Array(count).fill(false);
   for (let index = 0; index < count; index += 1) {
-    flags[index] = (bytes[index >> 3] & (1 << (index & 7))) !== 0;
+    flags[index] = (bytes[index >> 3] & (1 << (7 - (index & 7)))) !== 0;
   }
   return flags;
 }

@@ -1,5 +1,6 @@
 import { crc32 } from "./crc32.js";
 import { decompressLzma } from "./lzma-decode.js";
+import { decompressLzma2 } from "./lzma2-decode.js";
 import {
   bytesToHex,
   decodeUtf16LeStrings,
@@ -533,6 +534,7 @@ function buildEntries(header) {
     const isDirectory = file.isEmptyStream && !file.isEmptyFile;
     const streamRef = streamMap.entryStreams[index];
     const size = file.isEmptyStream ? 0n : streamRef?.size ?? null;
+    const downloadable = canDownloadEntry(header, streamMap, index);
     return {
       ...file,
       index,
@@ -543,8 +545,39 @@ function buildEntries(header) {
       createdTimeLabel: formatDate(file.createdTime),
       modifiedTimeLabel: formatDate(file.modifiedTime),
       accessTimeLabel: formatDate(file.accessTime),
+      downloadable,
     };
   });
+}
+
+export function canDownloadEntry(header, streamMap, entryIndex) {
+  const file = header.filesInfo?.[entryIndex];
+  if (!file || file.isAntiFile) {
+    return false;
+  }
+
+  if (file.isEmptyStream) {
+    return file.isEmptyFile;
+  }
+
+  const streamInfo = header.streamInfo;
+  const streamRef = streamMap.entryStreams[entryIndex];
+  if (!streamInfo || !streamRef) {
+    return false;
+  }
+
+  const folderPlan = streamMap.folderPlans[streamRef.folderIndex];
+  if (!folderPlan) {
+    return false;
+  }
+
+  const folder = streamInfo.unpackInfo.folders[folderPlan.folderIndex];
+  if (!folder || folderPlan.numPackedStreams !== 1 || folder.coders.length !== 1) {
+    return false;
+  }
+
+  const methodId = bytesToHex(folder.coders[0].methodId);
+  return methodId === "00" || methodId === "030101" || methodId === "21";
 }
 
 function buildStreamMap(header) {
@@ -626,6 +659,49 @@ function buildStreamMap(header) {
   };
 }
 
+function getPackedStreamOffset(packInfo, streamIndex) {
+  let offset = packInfo.packPos;
+  for (let index = 0; index < streamIndex; index += 1) {
+    offset += toSafeNumber(packInfo.sizes[index]);
+  }
+  return offset;
+}
+
+async function readFolderData(source, streamInfo, folderPlan) {
+  const folder = streamInfo.unpackInfo.folders[folderPlan.folderIndex];
+  if (folderPlan.numPackedStreams !== 1) {
+    throw new SevenZipError("Only single packed-stream folders are supported for download.");
+  }
+  if (folder.coders.length !== 1) {
+    throw new SevenZipError("Only single-coder folders are supported for download.");
+  }
+
+  const packInfo = streamInfo.packInfo;
+  const packSize = toSafeNumber(packInfo.sizes[folderPlan.packStreamIndex]);
+  const packOffset = getPackedStreamOffset(packInfo, folderPlan.packStreamIndex);
+  const packedBytes = await source.read(32 + packOffset, packSize);
+  const coder = folder.coders[0];
+  const methodId = bytesToHex(coder.methodId);
+
+  if (methodId === "00") {
+    return packedBytes;
+  }
+
+  if (methodId === "030101") {
+    const lzmaStream = new Uint8Array(coder.properties.length + 8 + packedBytes.length);
+    lzmaStream.set(coder.properties, 0);
+    new DataView(lzmaStream.buffer).setBigUint64(coder.properties.length, folderPlan.unpackedSize, true);
+    lzmaStream.set(packedBytes, coder.properties.length + 8);
+    return decompressLzma(lzmaStream);
+  }
+
+  if (methodId === "21") {
+    return decompressLzma2(packedBytes, coder.properties);
+  }
+
+  throw new SevenZipError(`Unsupported compression method for download: ${methodId}`);
+}
+
 const defaultFetch = (...args) => globalThis.fetch(...args);
 
 export async function inspectSevenZipUrl(url, fetchImpl = defaultFetch) {
@@ -645,4 +721,63 @@ export async function inspectSevenZipUrl(url, fetchImpl = defaultFetch) {
     signature,
     resolvedUrl: source.url,
   };
+}
+
+export async function extractEntryBytes(url, inspection, entryIndex, fetchImpl = defaultFetch) {
+  const entry = inspection.entries?.[entryIndex];
+  if (!entry) {
+    throw new SevenZipError("Selected archive entry was not found.");
+  }
+  if (entry.isDirectory || entry.isAntiFile) {
+    throw new SevenZipError("The selected entry is not a downloadable file.");
+  }
+  if (entry.isEmptyStream) {
+    return new Uint8Array();
+  }
+
+  const streamInfo = inspection.header?.streamInfo;
+  const streamMap = inspection.streamMap ?? buildStreamMap(inspection.header);
+  const streamRef = streamMap.entryStreams[entryIndex];
+  if (!streamInfo || !streamRef) {
+    throw new SevenZipError("The selected entry cannot be mapped to archive data.");
+  }
+
+  const folderPlan = streamMap.folderPlans[streamRef.folderIndex];
+  if (!folderPlan) {
+    throw new SevenZipError("The archive folder plan is missing for this entry.");
+  }
+
+  const folder = streamInfo.unpackInfo.folders[folderPlan.folderIndex];
+  if (folderPlan.numPackedStreams !== 1) {
+    throw new SevenZipError("Only single packed-stream folders are supported for download.");
+  }
+  if (folder.coders.length !== 1) {
+    throw new SevenZipError("Only single-coder folders are supported for download.");
+  }
+
+  const coder = folder.coders[0];
+  const methodId = bytesToHex(coder.methodId);
+  const packInfo = streamInfo.packInfo;
+  const packOffset = getPackedStreamOffset(packInfo, folderPlan.packStreamIndex);
+  const source = new HttpRangeSource(inspection.resolvedUrl || url, fetchImpl);
+  const length = toSafeNumber(streamRef.size);
+
+  if (methodId === "00") {
+    const start = toSafeNumber(streamRef.offset);
+    return source.read(32 + packOffset + start, length);
+  }
+
+  if (methodId === "030101") {
+    const folderData = await readFolderData(source, streamInfo, folderPlan);
+    const start = toSafeNumber(streamRef.offset);
+    return folderData.slice(start, start + length);
+  }
+
+  if (methodId === "21") {
+    const folderData = await readFolderData(source, streamInfo, folderPlan);
+    const start = toSafeNumber(streamRef.offset);
+    return folderData.slice(start, start + length);
+  }
+
+  throw new SevenZipError(`Unsupported compression method for download: ${methodId}`);
 }

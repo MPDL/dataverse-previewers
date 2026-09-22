@@ -137,12 +137,13 @@ function fileSizeSI(bytes) {
 }
 
 async function downloadFile(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
     const target = event.currentTarget;
-    if (target.dataset.entryIndex === undefined || target.download) {
+    if (target.dataset.entryIndex === undefined) {
         return;
     }
-    event.preventDefault();
-    target.removeAttribute("href");
 
     const entry = entries[Number(target.dataset.entryIndex)];
     if (!entry) {
@@ -150,13 +151,25 @@ async function downloadFile(event) {
     }
 
     try {
-        await download(entry, target.parentElement, target);
+        await download(entry, target.parentElement);
     } catch (error) {
         alert(error);
     }
 }
 
-async function download(entry, li, a) {
+function triggerBrowserDownload(fileName, bytes) {
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const blobURL = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobURL;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobURL);
+}
+
+async function download(entry, li) {
     if (li.classList.contains("busy")) {
         return;
     }
@@ -175,11 +188,7 @@ async function download(entry, li, a) {
         setProgressBarValue(25);
         const bytes = await extractEntryBytes(currentFileUrl, inspectionResult, entry.index);
         setProgressBarValue(90);
-        const blob = new Blob([bytes], { type: "application/octet-stream" });
-        const blobURL = URL.createObjectURL(blob);
-        a.href = blobURL;
-        a.download = fileName;
-        a.dispatchEvent(new MouseEvent("click"));
+        triggerBrowserDownload(fileName, bytes);
     } finally {
         li.classList.remove("busy");
         $("#myModal").modal("hide");
@@ -216,10 +225,10 @@ function createTree(dataStructure) {
             if (!node.folder) {
                 $tdList.eq(1).text(node.data.size || "");
                 if (!node.data.isAntiFile) {
-                    const downloadLink = $('<a href="#" data-entry-index="' + node.data.index + '">');
-                    downloadLink.click(downloadFile);
-                    downloadLink.append('<span class="icon glyphicon glyphicon-download-alt"></span>');
-                    $tdList.eq(2).html(downloadLink);
+                    const downloadButton = $('<button type="button" class="btn btn-link" data-entry-index="' + node.data.index + '">');
+                    downloadButton.click(downloadFile);
+                    downloadButton.append('<span class="icon glyphicon glyphicon-download-alt"></span>');
+                    $tdList.eq(2).html(downloadButton);
                 }
             }
         }

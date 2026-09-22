@@ -665,6 +665,34 @@ async function readFolderData(source, streamInfo, folderPlan) {
   throw new SevenZipError(`Unsupported compression method for download: ${methodId}`);
 }
 
+function getFolderAndMethod(streamInfo, folderPlan) {
+  const folder = streamInfo.unpackInfo.folders[folderPlan.folderIndex];
+  if (!folder) {
+    throw new SevenZipError("The archive folder is missing for this entry.");
+  }
+  if (folderPlan.numPackedStreams !== 1) {
+    throw new SevenZipError("Only single packed-stream folders are supported for download.");
+  }
+  if (folder.coders.length !== 1) {
+    throw new SevenZipError("Only single-coder folders are supported for download.");
+  }
+  const coder = folder.coders[0];
+  return { folder, coder, methodId: bytesToHex(coder.methodId) };
+}
+
+async function readStoredEntryData(source, streamInfo, folderPlan, streamRef) {
+  const packInfo = streamInfo.packInfo;
+  const streamSize = toSafeNumber(streamRef.size);
+  if (streamSize === 0) {
+    return new Uint8Array();
+  }
+
+  const packOffset = getPackedStreamOffset(packInfo, folderPlan.packStreamIndex);
+  const subStreamOffset = toSafeNumber(streamRef.offset);
+  const streamStart = 32 + packOffset + subStreamOffset;
+  return source.read(streamStart, streamSize);
+}
+
 const defaultFetch = (...args) => globalThis.fetch(...args);
 
 export async function inspectSevenZipUrl(url, fetchImpl = defaultFetch) {
@@ -711,6 +739,11 @@ export async function extractEntryBytes(url, inspection, entryIndex, fetchImpl =
   }
 
   const source = new HttpRangeSource(inspection.resolvedUrl || url, fetchImpl);
+  const { methodId } = getFolderAndMethod(streamInfo, folderPlan);
+  if (methodId === "00") {
+    return readStoredEntryData(source, streamInfo, folderPlan, streamRef);
+  }
+
   const folderData = await readFolderData(source, streamInfo, folderPlan);
   const start = toSafeNumber(streamRef.offset);
   const length = toSafeNumber(streamRef.size);

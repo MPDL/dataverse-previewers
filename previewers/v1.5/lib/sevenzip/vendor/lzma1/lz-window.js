@@ -63,6 +63,16 @@ export class LzOutWindow {
     }
   }
 
+  init(solid) {
+    if (!solid) {
+      this.pos = 0;
+      this.streamPos = 0;
+      if (this.buffer) {
+        this.buffer.fill(0);
+      }
+    }
+  }
+
   isEmpty() {
     return this.streamPos === 0;
   }

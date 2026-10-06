@@ -19,6 +19,7 @@
   "textPreviewText": "Text Preview",
   "videoPreviewText": "Video Preview",
   "zipPreviewText": "ZIP Preview",
+  "zipSplitWarning": "This ZIP archive is split into multiple files (.z01, .z02, ...). The structure can be shown, but individual files cannot be downloaded from the preview. Please download all archive files.",
   "mdPreviewText": "Markdown Preview",
   "ncmlPreviewText": "NcML Preview",
   "rocratePreviewText": "RO-Crate Preview",
